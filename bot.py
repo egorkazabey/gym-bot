@@ -25,7 +25,9 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
     Message,
+    WebAppInfo,
 )
 from dotenv import load_dotenv
 from html import escape
@@ -33,12 +35,15 @@ from html import escape
 from charts import progress_chart
 from db import DB
 from parser import ParseError, e1rm, fmt_sets, fmt_w, normalize_name, parse_message
+from webapp import create_app, start_server
 
 load_dotenv()
 TOKEN = os.environ["BOT_TOKEN"]
 TZ = ZoneInfo(os.getenv("TZ_NAME", "Europe/Prague"))
 DB_PATH = os.getenv("DB_PATH", "data/gym.db")
 ALLOWED = {int(x) for x in os.getenv("ALLOWED_USERS", "").replace(" ", "").split(",") if x}
+WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip()  # публичный https-адрес мини-аппа
+PORT = int(os.getenv("PORT", "8080"))
 
 db = DB(DB_PATH)
 router = Router()
@@ -65,7 +70,8 @@ HELP = """<b>Как записывать</b>
 /list  все упражнения
 /alias жим = жим лежа  склеить названия
 /undo  удалить последнюю запись
-/export  выгрузка в CSV"""
+/export  выгрузка в CSV
+/app  открыть дневник (мини-апп)"""
 
 
 # ---------- доступ ----------
@@ -163,18 +169,13 @@ async def with_exercise(message: Message, cmd: CommandObject, action: str, run):
 
 
 # ---------- запись тренировки ----------
-@router.message(F.text & ~F.text.startswith("/"))
-async def on_text(message: Message):
-    uid = message.from_user.id
-    when_date, body = extract_date(message.text)
-    try:
-        parsed = parse_message(body)
-    except ParseError as e:
-        await message.answer(f"⚠️ {escape(str(e))}\n\nФорматы: /help")
-        return
+def record_workout(uid: int, text: str) -> tuple[int, str] | None:
+    """Разбирает и сохраняет тренировку. Возвращает (id записи, отчёт в HTML) или None,
+    если подходов нет. Кидает ParseError на кривом формате. Используется ботом и мини-аппом."""
+    when_date, body = extract_date(text)
+    parsed = parse_message(body)
     if not parsed:
-        await message.answer("Не вижу подходов. Пример: <code>жим 80x8x3</code>\nВсе форматы: /help")
-        return
+        return None
 
     ts = now()
     if when_date:
@@ -232,12 +233,26 @@ async def on_text(message: Message):
                         lines.append(f"   🏆 рекорд повторов! было {old_mr}")
         report.append("\n".join(lines))
 
-    entry_id = db.add_entry(uid, message.text, ts, list(items.items()))
+    entry_id = db.add_entry(uid, text, ts, list(items.items()))
     header = f"📅 {fmt_day(day)}\n" if when_date else ""
+    return entry_id, header + "\n\n".join(report)
+
+
+@router.message(F.text & ~F.text.startswith("/"))
+async def on_text(message: Message):
+    try:
+        result = record_workout(message.from_user.id, message.text)
+    except ParseError as e:
+        await message.answer(f"⚠️ {escape(str(e))}\n\nФорматы: /help")
+        return
+    if not result:
+        await message.answer("Не вижу подходов. Пример: <code>жим 80x8x3</code>\nВсе форматы: /help")
+        return
+    entry_id, report = result
     kb = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="↩️ Отменить", callback_data=f"undo:{entry_id}")]]
     )
-    await message.answer(header + "\n\n".join(report), reply_markup=kb)
+    await message.answer(report, reply_markup=kb)
 
 
 @router.callback_query(F.data.startswith("undo:"))
@@ -416,6 +431,17 @@ async def cmd_alias(message: Message, command: CommandObject):
     await message.answer(f"Теперь «{escape(left)}» = «{escape(right)}».{extra}")
 
 
+@router.message(Command("app"))
+async def cmd_app(message: Message):
+    if not WEBAPP_URL:
+        await message.answer("Мини-апп не настроен: нужен WEBAPP_URL в .env")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📊 Открыть дневник", web_app=WebAppInfo(url=WEBAPP_URL))
+    ]])
+    await message.answer("Графики, рекорды и история тренировок:", reply_markup=kb)
+
+
 @router.message(Command("export"))
 async def cmd_export(message: Message):
     rows = db.all_sets(message.from_user.id)
@@ -448,8 +474,14 @@ async def main():
         BotCommand(command="list", description="Все упражнения"),
         BotCommand(command="undo", description="Удалить последнюю запись"),
         BotCommand(command="export", description="Выгрузка в CSV"),
+        BotCommand(command="app", description="Открыть дневник"),
         BotCommand(command="help", description="Как записывать"),
     ])
+    if WEBAPP_URL:
+        await start_server(create_app(db, TOKEN, ALLOWED, now, record_workout), PORT)
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Дневник", web_app=WebAppInfo(url=WEBAPP_URL))
+        )
     await dp.start_polling(bot)
 
 

@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Дневник тренировок</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg-2: var(--tg-theme-secondary-bg-color, #f1f1f4);
+    --section: var(--tg-theme-section-bg-color, var(--bg));
+    --text: var(--tg-theme-text-color, #0b0b0b);
+    --hint: var(--tg-theme-hint-color, #898781);
+    --link: var(--tg-theme-link-color, #2a78d6);
+    --accent: var(--tg-theme-button-color, #2a78d6);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --danger: var(--tg-theme-destructive-text-color, #e5484d);
+    --blue: #2a78d6;
+    --orange: #eb6834;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg-2); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 12px 16px 32px; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--hint); margin: 20px 4px 8px; }
+  .card { background: var(--section); border-radius: var(--radius); padding: 14px; }
+  .muted { color: var(--hint); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .tabs { display: flex; background: var(--section); border-radius: 12px; padding: 3px; gap: 3px;
+    position: sticky; top: 0; z-index: 5; }
+  .tabs button { flex: 1; padding: 8px 0; border-radius: 9px; font-weight: 500; color: var(--hint); }
+  .tabs button.on { background: var(--accent); color: var(--accent-text); }
+
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { background: var(--section); border-radius: var(--radius); padding: 12px; min-width: 0; }
+  .stat b { display: block; font-size: 20px; font-weight: 650; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .stat span { font-size: 12px; color: var(--hint); }
+  .delta { font-size: 13px; margin: 8px 4px 0; color: var(--hint); }
+  .up { color: #2f9e5b; } .down { color: var(--danger); }
+
+  .heat-wrap { overflow-x: auto; }
+  .heat { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px;
+    width: max-content; margin-left: auto; }
+  .heat i { width: 14px; height: 14px; border-radius: 3px; background: var(--bg-2); }
+  .heat i.l1 { background: color-mix(in srgb, var(--accent) 30%, var(--bg-2)); }
+  .heat i.l2 { background: color-mix(in srgb, var(--accent) 55%, var(--bg-2)); }
+  .heat i.l3 { background: color-mix(in srgb, var(--accent) 80%, var(--bg-2)); }
+  .heat i.l4 { background: var(--accent); }
+  .heat i.today { outline: 1.5px solid var(--text); outline-offset: -1.5px; }
+  .heat i.future { visibility: hidden; }
+
+  .list { background: var(--section); border-radius: var(--radius); overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; width: 100%; text-align: left; }
+  .row + .row { border-top: 0.5px solid color-mix(in srgb, var(--hint) 30%, transparent); }
+  .row .main { flex: 1; min-width: 0; }
+  .row .title { font-weight: 550; }
+  .row .sub { font-size: 13px; color: var(--hint); }
+  .row .right { text-align: right; font-size: 14px; white-space: nowrap; }
+  .chev::after { content: "›"; color: var(--hint); font-size: 20px; margin-left: 4px; }
+  .day-head { display: flex; justify-content: space-between; font-weight: 600; }
+  .day-ex { font-size: 14px; margin-top: 2px; }
+  .day-ex span { color: var(--hint); }
+
+  input[type=search], textarea { width: 100%; background: var(--section); color: var(--text);
+    border: 0; border-radius: 12px; padding: 11px 14px; font: inherit; outline: none; }
+  textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 15px; }
+  .btn { display: block; width: 100%; padding: 13px; border-radius: 12px; font-weight: 600;
+    background: var(--accent); color: var(--accent-text); margin-top: 10px; }
+  .btn.ghost { background: var(--section); color: var(--danger); }
+  .btn:disabled { opacity: .5; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip { background: var(--section); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+  .report { white-space: pre-wrap; line-height: 1.5; }
+  .report code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  .error { color: var(--danger); margin-top: 10px; white-space: pre-wrap; }
+  .hint-table { font-size: 13px; color: var(--hint); margin: 12px 4px 0; line-height: 1.7; }
+  .hint-table code { color: var(--text); font-family: ui-monospace, Menlo, monospace; }
+
+  .chart-box { position: relative; height: 220px; }
+  .chart-box.small { height: 130px; margin-top: 12px; }
+  .legend { display: flex; gap: 14px; font-size: 13px; color: var(--hint); margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px;
+    vertical-align: -1px; }
+  .ex-title { font-size: 22px; font-weight: 700; margin: 16px 4px 12px; }
+  .empty { text-align: center; padding: 48px 16px; color: var(--hint); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="overview" class="on">Обзор</button>
+  <button data-tab="exercises">Упражнения</button>
+  <button data-tab="log">Записать</button>
+</nav>
+
+<main id="overview"></main>
+<main id="exercises" class="hidden"></main>
+<main id="exercise" class="hidden"></main>
+<main id="log" class="hidden">
+  <h2>Новая запись</h2>
+  <textarea id="log-text" placeholder="жим лежа 80x8x3&#10;подтягивания x10x3"></textarea>
+  <div class="chips" id="log-chips"></div>
+  <button class="btn" id="log-send">Сохранить</button>
+  <div class="error hidden" id="log-error"></div>
+  <div id="log-result" class="hidden">
+    <h2>Сохранено</h2>
+    <div class="card report" id="log-report"></div>
+    <button class="btn ghost" id="log-undo">Отменить запись</button>
+  </div>
+  <div class="hint-table">
+    <code>жим 80x8x3</code> 3 подхода по 8 с 80 кг<br>
+    <code>жим 80x8,8,7</code> разные повторы<br>
+    <code>жим 80x8x2 85x6</code> несколько групп<br>
+    <code>подтягивания x10x3</code> свой вес<br>
+    <code>подтягивания +10x8x3</code> с доп. весом<br>
+    Первой строкой <code>вчера</code> или <code>28.09</code>, чтобы записать задним числом.
+  </div>
+</main>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+
+const WD = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const parseDay = (s) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fmtDay = (s) => { const d = parseDay(s); return `${WD[(d.getDay() + 6) % 7]} ${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const fmtNum = (n) => Number(n).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+const fmtKg = (n) => n >= 10000 ? `${fmtNum(n / 1000)} т` : `${fmtNum(n)} кг`;
+const plural = (n, one, few, many) => {
+  const m10 = n % 10, m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+};
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: { "X-Init-Data": tg?.initData || "", ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({ error: `Ошибка сервера (${res.status})` }));
+  if (!res.ok) throw new Error(data.error || `Ошибка ${res.status}`);
+  return data;
+}
+
+// ---------- навигация ----------
+let summary = null;
+let current = "overview";
+let charts = [];
+
+function show(view) {
+  for (const id of ["overview", "exercises", "exercise", "log"]) $(id).classList.toggle("hidden", id !== view);
+  const tab = view === "exercise" ? "exercises" : view;
+  for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.tab === tab);
+  if (view === "exercise") tg?.BackButton.show(); else tg?.BackButton.hide();
+  current = view;
+  window.scrollTo(0, 0);
+}
+
+$("tabs").addEventListener("click", (e) => {
+  const tab = e.target.dataset?.tab;
+  if (!tab) return;
+  tg?.HapticFeedback?.selectionChanged();
+  show(tab);
+});
+tg?.BackButton.onClick(() => show("exercises"));
+
+// ---------- обзор ----------
+function renderOverview(s) {
+  const el = $("overview");
+  if (!s.exercises.length) {
+    el.innerHTML = `<div class="empty">Пока пусто.<br>Запиши первую тренировку во вкладке «Записать» или просто напиши боту <b>жим 80x8x3</b></div>`;
+    return;
+  }
+  const w = s.week, p = s.prev_week;
+  let delta = "";
+  if (p.tonnage) {
+    const d = Math.round((w.tonnage - p.tonnage) / p.tonnage * 100);
+    delta = `<div class="delta">Тоннаж <span class="${d >= 0 ? "up" : "down"}">${d > 0 ? "+" : ""}${d}%</span> к прошлой неделе на тот же день</div>`;
+  }
+
+  // тепловая карта: колонки недели, строки дни недели
+  const byDay = Object.fromEntries(s.activity.map((a) => [a.day, a]));
+  const maxT = Math.max(1, ...s.activity.map((a) => a.tonnage || a.sets * 100));
+  const cells = [];
+  const start = parseDay(s.activity_start);
+  for (let d = new Date(start); isoDay(d) <= s.today || d.getDay() !== 1; d.setDate(d.getDate() + 1)) {
+    const key = isoDay(d);
+    const a = byDay[key];
+    let cls = "";
+    if (key > s.today) cls = "future";
+    else if (a) cls = "l" + Math.min(4, Math.max(1, Math.ceil(((a.tonnage || a.sets * 100) / maxT) * 4)));
+    if (key === s.today) cls += " today";
+    const tip = a ? `${fmtDay(key)}: ${a.sets} подх.${a.tonnage ? ", " + fmtKg(a.tonnage) : ""}` : fmtDay(key);
+    cells.push(`<i class="${cls}" title="${tip}"></i>`);
+  }
+
+  el.innerHTML = `
+    <h2>Эта неделя</h2>
+    <div class="stats">
+      <div class="stat"><b class="num">${w.days}</b><span>${plural(w.days, "тренировка", "тренировки", "тренировок")}</span></div>
+      <div class="stat"><b class="num">${w.sets}</b><span>подходов</span></div>
+      <div class="stat"><b class="num">${fmtKg(w.tonnage)}</b><span>тоннаж</span></div>
+    </div>
+    ${delta}
+    <h2>Активность</h2>
+    <div class="card heat-wrap"><div class="heat">${cells.join("")}</div></div>
+    <h2>Последние тренировки</h2>
+    <div class="list">${s.recent.map((d) => `
+      <div class="row"><div class="main">
+        <div class="day-head"><span>${fmtDay(d.day)}</span>
+          <span class="muted num">${d.sets} подх.${d.tonnage ? " · " + fmtKg(d.tonnage) : ""}</span></div>
+        ${d.exercises.map((e) => `<div class="day-ex">${esc(cap(e.name))} <span>${esc(e.text)}</span></div>`).join("")}
+      </div></div>`).join("")}
+    </div>`;
+}
+
+// ---------- упражнения ----------
+function bestText(e) {
+  return e.weighted ? `${fmtNum(e.best.weight)}×${e.best.reps}` : `${e.best.reps} повт.`;
+}
+
+function renderExercises(s) {
+  const el = $("exercises");
+  if (!s.exercises.length) {
+    el.innerHTML = `<div class="empty">Упражнений пока нет</div>`;
+    return;
+  }
+  el.innerHTML = `
+    <h2>Все упражнения</h2>
+    <input type="search" id="ex-search" placeholder="Поиск">
+    <div class="list" id="ex-list" style="margin-top:10px"></div>`;
+  const draw = (q) => {
+    const items = s.exercises.filter((e) => e.name.includes(q.toLowerCase().trim()));
+    $("ex-list").innerHTML = items.map((e) => `
+      <button class="row" data-name="${esc(e.name)}">
+        <div class="main"><div class="title">${esc(cap(e.name))}</div>
+          <div class="sub">${e.sessions} трен. · последняя ${fmtDay(e.last)}</div></div>
+        <div class="right num">${bestText(e)}${e.e1rm ? `<div class="sub">1ПМ ≈ ${Math.round(e.e1rm)}</div>` : ""}</div>
+        <span class="chev"></span>
+      </button>`).join("") || `<div class="row muted">Ничего не нашлось</div>`;
+  };
+  draw("");
+  $("ex-search").addEventListener("input", (e) => draw(e.target.value));
+  $("ex-list").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-name]");
+    if (row) openExercise(row.dataset.name);
+  });
+}
+
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function makeChart(canvas, type, labels, datasets, integer) {
+  const hint = css("--hint");
+  return new Chart(canvas, {
+    type,
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, locale: "ru-RU",
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+      scales: {
+        x: { ticks: { color: hint, maxTicksLimit: 6, maxRotation: 0 }, grid: { display: false } },
+        y: { ticks: { color: hint, precision: integer ? 0 : undefined, maxTicksLimit: 5 },
+             grid: { color: "rgba(128,128,128,.15)" }, border: { display: false } },
+      },
+    },
+  });
+}
+
+async function openExercise(name) {
+  tg?.HapticFeedback?.impactOccurred("light");
+  const el = $("exercise");
+  el.innerHTML = `<div class="empty">Загружаю…</div>`;
+  show("exercise");
+  let d;
+  try { d = await api(`/api/exercise?name=${encodeURIComponent(name)}`); }
+  catch (err) { el.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+
+  charts.forEach((c) => c.destroy());
+  charts = [];
+  const meta = summary.exercises.find((e) => e.name === name);
+  const ss = d.sessions;
+  const labels = ss.map((s) => fmtDay(s.day));
+  const first = ss[0], last = ss[ss.length - 1];
+
+  const tiles = d.weighted ? `
+      <div class="stat"><b class="num">${bestText(meta)}</b><span>лучший подход</span></div>
+      <div class="stat"><b class="num">${Math.round(meta.e1rm)}</b><span>1ПМ, кг</span></div>
+      <div class="stat"><b class="num">${ss.length}</b><span>тренировок</span></div>` : `
+      <div class="stat"><b class="num">${meta.best.reps}</b><span>лучший подход</span></div>
+      <div class="stat"><b class="num">${Math.max(...ss.map((s) => s.total_reps))}</b><span>макс. за трен.</span></div>
+      <div class="stat"><b class="num">${ss.length}</b><span>тренировок</span></div>`;
+
+  const change = ss.length > 1 ? (d.weighted
+    ? `Рабочий вес ${fmtNum(first.top)} → ${fmtNum(last.top)} кг с ${fmtDay(first.day)}`
+    : `Лучший подход ${first.max_reps} → ${last.max_reps} повт. с ${fmtDay(first.day)}`) : "";
+
+  el.innerHTML = `
+    <div class="ex-title">${esc(cap(name))}</div>
+    <div class="stats">${tiles}</div>
+    ${change ? `<div class="delta">${change}</div>` : ""}
+    ${ss.length > 1 ? `
+    <h2>${d.weighted ? "Прогресс" : "Повторы"}</h2>
+    <div class="card">
+      ${d.weighted ? `<div class="legend"><span><i style="background:var(--orange)"></i>1ПМ</span>
+        <span><i style="background:var(--blue)"></i>Рабочий вес</span></div>` : ""}
+      <div class="chart-box"><canvas id="c-main"></canvas></div>
+      <div class="muted" style="font-size:12px;margin-top:10px">${d.weighted ? "Тоннаж за тренировку, кг" : "Всего повторов за тренировку"}</div>
+      <div class="chart-box small"><canvas id="c-vol"></canvas></div>
+    </div>` : ""}
+    <h2>История</h2>
+    <div class="list">${[...ss].reverse().map((s) => `
+      <div class="row"><div class="main"><div class="title">${fmtDay(s.day)}</div>
+        <div class="sub num">${esc(s.text)}</div></div>
+        <div class="right muted num">${d.weighted ? fmtKg(s.volume) : s.total_reps + " повт."}</div></div>`).join("")}
+    </div>`;
+
+  if (ss.length > 1) {
+    const line = (data, color) => ({ data, borderColor: color, backgroundColor: color, borderWidth: 2,
+      pointRadius: ss.length > 30 ? 0 : 3, tension: 0.25 });
+    const blue = css("--blue"), orange = css("--orange");
+    charts.push(makeChart($("c-main"), "line", labels, d.weighted
+      ? [{ label: "1ПМ", ...line(ss.map((s) => s.e1rm), orange) },
+         { label: "Рабочий вес", ...line(ss.map((s) => s.top), blue) }]
+      : [{ label: "Лучший подход", ...line(ss.map((s) => s.max_reps), blue) }], !d.weighted));
+    charts.push(makeChart($("c-vol"), "bar", labels, [{
+      label: d.weighted ? "Тоннаж" : "Повторов",
+      data: ss.map((s) => d.weighted ? s.volume : s.total_reps),
+      backgroundColor: blue, borderRadius: 3, maxBarThickness: 18,
+    }], true));
+  }
+}
+
+// ---------- запись ----------
+let lastEntry = null;
+
+function renderChips(s) {
+  const names = s.exercises.slice(0, 8).map((e) => e.name);
+  $("log-chips").innerHTML = names.map((n) => `<button class="chip" data-name="${esc(n)}">${esc(n)}</button>`).join("");
+}
+
+$("log-chips").addEventListener("click", (e) => {
+  const name = e.target.dataset?.name;
+  if (!name) return;
+  const ta = $("log-text");
+  const sep = ta.value && !ta.value.endsWith("\n") ? "\n" : "";
+  ta.value += `${sep}${name} `;
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+});
+
+$("log-send").addEventListener("click", async () => {
+  const text = $("log-text").value.trim();
+  if (!text) return;
+  const btn = $("log-send");
+  btn.disabled = true;
+  $("log-error").classList.add("hidden");
+  try {
+    const r = await api("/api/log", { text });
+    lastEntry = r.entry_id;
+    $("log-report").innerHTML = r.report; // HTML уже экранирован на сервере
+    $("log-result").classList.remove("hidden");
+    $("log-undo").disabled = false;
+    $("log-text").value = "";
+    tg?.HapticFeedback?.notificationOccurred("success");
+    load();
+  } catch (err) {
+    $("log-error").textContent = "⚠️ " + err.message;
+    $("log-error").classList.remove("hidden");
+    tg?.HapticFeedback?.notificationOccurred("error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("log-undo").addEventListener("click", async () => {
+  if (!lastEntry) return;
+  $("log-undo").disabled = true;
+  try {
+    await api("/api/undo", { entry_id: lastEntry });
+    $("log-report").innerHTML += "\n\n<s>запись удалена</s>";
+    lastEntry = null;
+    load();
+  } catch (err) {
+    $("log-undo").disabled = false;
+    tg?.showAlert?.(err.message);
+  }
+});
+
+// ---------- загрузка ----------
+async function load() {
+  try {
+    summary = await api("/api/summary");
+  } catch (err) {
+    $("overview").innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    return;
+  }
+  renderOverview(summary);
+  renderExercises(summary);
+  renderChips(summary);
+}
+
+load();
+</script>
+</body>
+</html>
